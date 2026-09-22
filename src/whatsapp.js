@@ -2,6 +2,7 @@
 
 const { Boom } = require('@hapi/boom');
 const pino = require('pino');
+const qrcode = require('qrcode-terminal');
 
 const AUTH_DIR = process.env.PIKABORA_AUTH_DIR || './auth_state';
 
@@ -32,13 +33,16 @@ async function connect(onMessage) {
     version,
     auth: state,
     logger: pino({ level: 'warn' }),
-    printQRInTerminal: true,
   });
 
   sock.ev.on('creds.update', saveCreds);
 
   sock.ev.on('connection.update', (update) => {
-    const { connection, lastDisconnect } = update;
+    const { connection, lastDisconnect, qr } = update;
+    if (qr) {
+      qrcode.generate(qr, { small: true });
+      console.log('^^^^ SCAN THE QR CODE ABOVE WITH YOUR BOT PHONE ^^^^');
+    }
     if (connection === 'close') {
       const shouldReconnect = new Boom(lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
       console.log('connection closed, reconnecting:', shouldReconnect);
