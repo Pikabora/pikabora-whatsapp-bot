@@ -83,6 +83,16 @@ async function main() {
 }
 
 if (require.main === module) {
+  // Start dummy HTTP server for Render Web Service health checks
+  const http = require('http');
+  const port = process.env.PORT || 3000;
+  http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('Pikabora Bot is running!\n');
+  }).listen(port, () => {
+    console.log(`Health check server listening on port ${port}`);
+  });
+
   main().catch(e => { console.error('Fatal error:', e); process.exit(1); });
 }
 
