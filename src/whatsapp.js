@@ -1,10 +1,5 @@
 'use strict';
-const {
-  default: makeWASocket,
-  useMultiFileAuthState,
-  DisconnectReason,
-  fetchLatestBaileysVersion,
-} = require('@whiskeysockets/baileys');
+
 const { Boom } = require('@hapi/boom');
 const pino = require('pino');
 
@@ -23,6 +18,13 @@ const AUTH_DIR = process.env.PIKABORA_AUTH_DIR || './auth_state';
  * works" because the rest of the pipeline does.
  */
 async function connect(onMessage) {
+  const {
+    default: makeWASocket,
+    useMultiFileAuthState,
+    DisconnectReason,
+    fetchLatestBaileysVersion,
+  } = await import('@whiskeysockets/baileys');
+
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
   const { version } = await fetchLatestBaileysVersion();
 
