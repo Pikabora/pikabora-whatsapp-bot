@@ -52,15 +52,24 @@ async function connect(onMessage) {
     }
   });
 
-  sock.ev.on('messages.upsert', async ({ messages }) => {
+  sock.ev.on('messages.upsert', async ({ messages, type }) => {
+    console.log(`[messages.upsert] type=${type}, count=${messages.length}`);
+    // Only process real incoming messages, not history sync
+    if (type !== 'notify') return;
     for (const msg of messages) {
       if (!msg.message || msg.key.fromMe) continue;
       const text =
         msg.message.conversation ||
         msg.message.extendedTextMessage?.text ||
+        msg.message.imageMessage?.caption ||
         '';
+      console.log(`[MSG] from=${msg.key.remoteJid} text="${text}" fromMe=${msg.key.fromMe}`);
       if (!text) continue;
-      await onMessage(msg.key.remoteJid, text, sock);
+      try {
+        await onMessage(msg.key.remoteJid, text, sock);
+      } catch (e) {
+        console.error('[onMessage error]', e);
+      }
     }
   });
 
