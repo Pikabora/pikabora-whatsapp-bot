@@ -21,13 +21,17 @@ function getSession(jid) {
 
 async function main() {
   const sock = await connect(async (fromJid, text, sockRef) => {
+    console.log(`[INCOMING] from ${fromJid}: ${text}`);
+
     // Messages FROM the reviewer are commands about pending drafts, not a
     // new end-user conversation.
     if (REVIEWER_JID && fromJid === REVIEWER_JID) {
       const result = reviewQueue.resolveReviewerMessage(text);
       if (result.action === 'approve' || result.action === 'edit') {
-        await sockRef.sendMessage(result.toPhone, { text: result.text });
-        await sockRef.sendMessage(REVIEWER_JID, { text: `Sent to ${result.toPhone}.` });
+        try {
+          await sockRef.sendMessage(result.toPhone, { text: result.text });
+          await sockRef.sendMessage(REVIEWER_JID, { text: `Sent to ${result.toPhone}.` });
+        } catch (e) { console.error('Error sending reviewer action:', e); }
       } else if (result.action === 'unknown_id') {
         await sockRef.sendMessage(REVIEWER_JID, { text: `No pending draft with id ${result.id}.` });
       }
@@ -54,7 +58,9 @@ async function main() {
 
     if (result.reply) {
       // Plain onboarding prompt -- pre-scripted, safe, no approval needed.
-      await sockRef.sendMessage(fromJid, { text: result.reply });
+      try {
+        await sockRef.sendMessage(fromJid, { text: result.reply });
+      } catch (e) { console.error('Error sending reply:', e); }
       return;
     }
 
