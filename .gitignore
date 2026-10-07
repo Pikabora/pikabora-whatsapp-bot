@@ -1,3 +1,5 @@
 node_modules/
-auth_state/
+dist/
 .env
+*.log
+.DS_Store
