@@ -7,9 +7,22 @@ import { sendWhatsAppText } from "./whatsappApi";
 
 dotenv.config();
 
-// Initialize Firebase Admin SDK if not already initialized
-if (!admin.apps.length) {
-  admin.initializeApp();
+// Initialize Firebase Admin SDK safely if credentials exist
+try {
+  if (!admin.apps.length) {
+    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+      const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+      });
+      console.log("✅ Firebase Admin initialized with service account.");
+    } else {
+      admin.initializeApp();
+      console.log("ℹ️ Firebase Admin initialized with default project credentials.");
+    }
+  }
+} catch (err: any) {
+  console.warn("⚠️ Firebase Admin initialization notice:", err.message);
 }
 
 const app = express();
@@ -38,6 +51,8 @@ app.get("/webhook", (req, res) => {
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
 
+  console.log(`🔍 Webhook Verification Attempt: mode=${mode}, token=${token}`);
+
   if (mode && token) {
     if (mode === "subscribe" && token === VERIFY_TOKEN) {
       console.log("✅ Meta Webhook verified successfully!");
@@ -56,6 +71,9 @@ app.get("/webhook", (req, res) => {
 app.post("/webhook", async (req, res) => {
   const body = req.body;
 
+  // Immediately acknowledge Meta Webhook to avoid timeout retries
+  res.status(200).send("EVENT_RECEIVED");
+
   if (body.object === "whatsapp_business_account") {
     const entry = body.entry?.[0];
     const change = entry?.changes?.[0]?.value;
@@ -63,59 +81,72 @@ app.post("/webhook", async (req, res) => {
 
     if (message && message.type === "text") {
       const rawFrom = message.from; // e.g. 2348111156597 or 254182533383
-      const text = message.text?.body || "";
+      const userText = message.text?.body || "";
       const msgId = message.id;
 
       const norm = normalizePhoneNumber(rawFrom);
       const waId = norm.waId;
       const isTester = isTesterNumber(rawFrom) || isTesterNumber(waId);
 
-      console.log(`📩 Incoming message from ${norm.phoneE164}${isTester ? " [TESTER]" : ""}: "${text}"`);
+      console.log(`📩 [INCOMING] From ${norm.phoneE164}${isTester ? " [TESTER]" : ""}: "${userText}"`);
 
-      const db = admin.firestore();
+      // Store in Firestore asynchronously if available
+      try {
+        if (admin.apps.length) {
+          const db = admin.firestore();
+          await db.collection("kenyabot_subscribers").doc(waId).set(
+            {
+              waId,
+              phoneE164: norm.phoneE164,
+              lastUserMessageAt: admin.firestore.FieldValue.serverTimestamp(),
+              isTester: isTester,
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
 
-      // Update subscriber document with latest timestamp and tester status
-      await db.collection("kenyabot_subscribers").doc(waId).set(
-        {
-          waId,
-          phoneE164: norm.phoneE164,
-          lastUserMessageAt: admin.firestore.FieldValue.serverTimestamp(),
-          isTester: isTester,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
+          await db
+            .collection("whatsapp_conversations")
+            .doc(waId)
+            .collection("messages")
+            .doc(msgId)
+            .set({
+              author: "user",
+              text: userText,
+              timestamp: admin.firestore.FieldValue.serverTimestamp(),
+              isTesterMessage: isTester,
+            });
+        }
+      } catch (dbErr: any) {
+        console.warn("⚠️ Firestore save warning:", dbErr.message);
+      }
 
-      // Store incoming user message in Firestore
-      await db
-        .collection("whatsapp_conversations")
-        .doc(waId)
-        .collection("messages")
-        .doc(msgId)
-        .set({
-          author: "user",
-          text,
-          timestamp: admin.firestore.FieldValue.serverTimestamp(),
-          isTesterMessage: isTester,
+      // Generate bot response text
+      try {
+        const botReply = await processUserMessage(waId, userText);
+
+        console.log(`📤 [OUTGOING] Replying to ${norm.phoneE164}: "${botReply.substring(0, 50)}..."`);
+
+        // Send reply DIRECTLY via Meta WhatsApp Cloud API!
+        const apiResult = await sendWhatsAppText({
+          to: norm.phoneE164,
+          body: botReply,
         });
 
-      // Process Bot Engine Logic
-      try {
-        await processUserMessage(waId, text);
-      } catch (err: any) {
-        console.error("Error processing bot logic:", err.message);
+        if (apiResult.ok) {
+          console.log(`✅ [DELIVERED] Message sent successfully to ${norm.phoneE164}! waMessageId=${apiResult.messageId}`);
+        } else {
+          console.error(`❌ [DELIVERY FAILED] Could not send WhatsApp reply to ${norm.phoneE164}:`, apiResult.error);
+        }
+      } catch (engineErr: any) {
+        console.error("❌ Error executing bot engine:", engineErr.message);
       }
     }
-
-    return res.status(200).send("EVENT_RECEIVED");
   }
-
-  res.sendStatus(404);
 });
 
 /**
  * 3. Manual Tester Trigger Endpoint (POST /test-send)
- * Useful for testing numbers like 08111156597 or 07033180897 without sending actual WhatsApp messages first!
  */
 app.post("/test-send", async (req, res) => {
   const { phone, text } = req.body;
@@ -130,7 +161,6 @@ app.post("/test-send", async (req, res) => {
   try {
     const reply = await processUserMessage(norm.waId, text);
 
-    // Send direct WhatsApp text for immediate tester confirmation
     const apiResult = await sendWhatsAppText({
       to: norm.phoneE164,
       body: reply,

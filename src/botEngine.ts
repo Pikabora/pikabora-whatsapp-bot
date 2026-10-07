@@ -2,25 +2,39 @@ import * as admin from "firebase-admin";
 import { KenyaBotSubscriber } from "./types";
 import { isTesterNumber } from "./serviceWindow";
 
+// In-memory state store fallback (guarantees multi-turn conversation works even if Firestore isn't connected on Render!)
+const memoryStore = new Map<string, Partial<KenyaBotSubscriber>>();
+
 /**
  * Stateful Conversational Bot Engine for KenyaBot / Pikabora.
- * Processes user messages and creates agent responses in Firestore.
+ * Processes user messages and returns conversational reply.
  */
 export async function processUserMessage(waId: string, userText: string): Promise<string> {
-  const db = admin.firestore();
-  const subRef = db.collection("kenyabot_subscribers").doc(waId);
-  const subSnap = await subRef.get();
+  let subData: KenyaBotSubscriber = { waId, phoneE164: `+${waId}` };
 
-  const subData: KenyaBotSubscriber = subSnap.exists
-    ? (subSnap.data() as KenyaBotSubscriber)
-    : { waId, phoneE164: `+${waId}` };
+  // Try retrieving state from Firestore if initialized
+  try {
+    if (admin.apps.length) {
+      const db = admin.firestore();
+      const subSnap = await db.collection("kenyabot_subscribers").doc(waId).get();
+      if (subSnap.exists) {
+        subData = { ...subData, ...(subSnap.data() as KenyaBotSubscriber) };
+      }
+    }
+  } catch (err: any) {
+    console.warn("⚠️ Firestore read warning (using in-memory fallback):", err.message);
+  }
+
+  // Merge in-memory state
+  const mem = memoryStore.get(waId) || {};
+  subData = { ...subData, ...mem };
 
   const cleanedText = userText.trim().toLowerCase();
   const isTester = subData.isTester || isTesterNumber(waId);
 
   let replyText = "";
   let updatedState: Partial<KenyaBotSubscriber> = {
-    updatedAt: admin.firestore.FieldValue.serverTimestamp() as any,
+    updatedAt: new Date() as any,
   };
 
   // 1. Initial Greeting / Reset
@@ -75,7 +89,14 @@ export async function processUserMessage(waId: string, userText: string): Promis
       `Now tell me, what food ingredients do you have in your kitchen right now?`;
   }
   // 5. Ingredients Input -> Recipe Recommendation
-  else if (subData.step === "AWAITING_INGREDIENTS" || cleanedText.includes("egg") || cleanedText.includes("spinach") || cleanedText.includes("ugali") || cleanedText.includes("beans") || cleanedText.includes("sukuma")) {
+  else if (
+    subData.step === "AWAITING_INGREDIENTS" ||
+    cleanedText.includes("egg") ||
+    cleanedText.includes("spinach") ||
+    cleanedText.includes("ugali") ||
+    cleanedText.includes("beans") ||
+    cleanedText.includes("sukuma")
+  ) {
     const ingredients = userText;
     updatedState.step = "COMPLETED";
 
@@ -103,23 +124,29 @@ export async function processUserMessage(waId: string, userText: string): Promis
       `To start a guided meal plan or maternal nutrition check, reply with **Hi**!`;
   }
 
-  // Update subscriber state in Firestore
-  await subRef.set(updatedState, { merge: true });
+  // Update in-memory state store
+  memoryStore.set(waId, { ...subData, ...updatedState });
 
-  // Add agent reply to Firestore messages subcollection
-  const agentMsgRef = db
-    .collection("whatsapp_conversations")
-    .doc(waId)
-    .collection("messages")
-    .doc();
-
-  await agentMsgRef.set({
-    author: "agent",
-    text: replyText,
-    timestamp: admin.firestore.FieldValue.serverTimestamp(),
-    deliveryStatus: "pending",
-    isTesterMessage: isTester,
-  });
+  // Try updating Firestore asynchronously
+  try {
+    if (admin.apps.length) {
+      const db = admin.firestore();
+      await db.collection("kenyabot_subscribers").doc(waId).set(updatedState, { merge: true });
+      await db
+        .collection("whatsapp_conversations")
+        .doc(waId)
+        .collection("messages")
+        .add({
+          author: "agent",
+          text: replyText,
+          timestamp: admin.firestore.FieldValue.serverTimestamp(),
+          deliveryStatus: "sent",
+          isTesterMessage: isTester,
+        });
+    }
+  } catch (err: any) {
+    console.warn("⚠️ Firestore write warning:", err.message);
+  }
 
   return replyText;
 }
