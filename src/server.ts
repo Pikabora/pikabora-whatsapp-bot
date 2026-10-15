@@ -3,7 +3,7 @@ import * as admin from "firebase-admin";
 import dotenv from "dotenv";
 import { normalizePhoneNumber, isTesterNumber } from "./serviceWindow";
 import { processUserMessage } from "./botEngine";
-import { sendWhatsAppText } from "./whatsappApi";
+import { sendWhatsAppText, getPhoneNumberStatus, registerPhoneNumber } from "./whatsappApi";
 
 dotenv.config();
 
@@ -178,6 +178,37 @@ app.post("/test-send", async (req, res) => {
   }
 });
 
+/**
+ * 4. Meta Phone Number Status & Inspection Endpoint (GET /meta-status)
+ */
+app.get("/meta-status", async (req, res) => {
+  try {
+    const status = await getPhoneNumberStatus();
+    res.status(200).json({ success: true, meta: status });
+  } catch (err: any) {
+    const errorData = err.response?.data || err.message;
+    res.status(500).json({ success: false, error: errorData });
+  }
+});
+
+/**
+ * 5. Meta Phone Number Registration Endpoint (POST /register-phone)
+ * Required to clear "(#133010) Account not registered"
+ */
+app.post("/register-phone", async (req, res) => {
+  const pin = req.body?.pin || "123456";
+  try {
+    const result = await registerPhoneNumber(pin);
+    console.log(`✅ Phone registered successfully with PIN ${pin}`);
+    res.status(200).json({ success: true, result });
+  } catch (err: any) {
+    const errorData = err.response?.data || err.message;
+    console.error("❌ Phone registration failed:", errorData);
+    res.status(500).json({ success: false, error: errorData });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`🚀 KenyaBot Express Webhook Server listening on port ${PORT}`);
 });
+

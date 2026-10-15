@@ -66,3 +66,57 @@ export async function sendWhatsAppText({
     };
   }
 }
+
+/**
+ * Registers the phone number with Meta Cloud API using a 6-digit PIN.
+ * Required when switching from a test number or onboarding a live phone number.
+ */
+export async function registerPhoneNumber(pin: string = "123456"): Promise<any> {
+  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+  const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
+
+  if (!phoneNumberId || !accessToken) {
+    throw new Error("Missing WHATSAPP_PHONE_NUMBER_ID or WHATSAPP_ACCESS_TOKEN");
+  }
+
+  const url = `https://graph.facebook.com/v19.0/${phoneNumberId}/register`;
+
+  const response = await axios.post(
+    url,
+    {
+      messaging_product: "whatsapp",
+      pin: pin,
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+    }
+  );
+
+  return response.data;
+}
+
+/**
+ * Queries Meta Graph API for the phone number status and metadata.
+ */
+export async function getPhoneNumberStatus(): Promise<any> {
+  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+  const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
+
+  if (!phoneNumberId || !accessToken) {
+    throw new Error("Missing WHATSAPP_PHONE_NUMBER_ID or WHATSAPP_ACCESS_TOKEN");
+  }
+
+  const url = `https://graph.facebook.com/v19.0/${phoneNumberId}?fields=verified_name,code_verification_status,display_phone_number,quality_rating,platform_type,throughput`;
+
+  const response = await axios.get(url, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  return response.data;
+}
+
