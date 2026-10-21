@@ -3,6 +3,7 @@ import axios from "axios";
 export interface SendMessageOptions {
   to: string;
   body: string;
+  phoneNumberId?: string;
 }
 
 export interface SendMessageResult {
@@ -17,8 +18,9 @@ export interface SendMessageResult {
 export async function sendWhatsAppText({
   to,
   body,
+  phoneNumberId: customPhoneId,
 }: SendMessageOptions): Promise<SendMessageResult> {
-  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+  const phoneNumberId = customPhoneId || process.env.WHATSAPP_PHONE_NUMBER_ID;
   const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
 
   if (!phoneNumberId || !accessToken) {
@@ -101,8 +103,8 @@ export async function registerPhoneNumber(pin: string = "123456"): Promise<any> 
 /**
  * Queries Meta Graph API for the phone number status and metadata.
  */
-export async function getPhoneNumberStatus(): Promise<any> {
-  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+export async function getPhoneNumberStatus(customId?: string): Promise<any> {
+  const phoneNumberId = customId || process.env.WHATSAPP_PHONE_NUMBER_ID;
   const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
 
   if (!phoneNumberId || !accessToken) {

@@ -149,7 +149,7 @@ app.post("/webhook", async (req, res) => {
  * 3. Manual Tester Trigger Endpoint (POST /test-send)
  */
 app.post("/test-send", async (req, res) => {
-  const { phone, text } = req.body;
+  const { phone, text, phone_number_id } = req.body;
 
   if (!phone || !text) {
     return res.status(400).json({ error: "Please provide 'phone' and 'text' in body." });
@@ -164,6 +164,7 @@ app.post("/test-send", async (req, res) => {
     const apiResult = await sendWhatsAppText({
       to: norm.phoneE164,
       body: reply,
+      phoneNumberId: phone_number_id,
     });
 
     return res.status(200).json({
@@ -183,7 +184,8 @@ app.post("/test-send", async (req, res) => {
  */
 app.get("/meta-status", async (req, res) => {
   try {
-    const status = await getPhoneNumberStatus();
+    const customId = req.query.id as string | undefined;
+    const status = await getPhoneNumberStatus(customId);
     res.status(200).json({ success: true, meta: status });
   } catch (err: any) {
     const errorData = err.response?.data || err.message;
